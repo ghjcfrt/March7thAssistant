@@ -141,6 +141,7 @@ weekly_divergent_enable: false # 是否启用每周优先运行一次差分宇�
 weekly_divergent_timestamp: 0 # 上次运行每周一次差分宇宙的时间戳。
 universe_fate: "不配置" # 模拟宇宙使用的命途
 universe_difficulty: 0 # 模拟宇宙使用的难度
+universe_auto_check_update: true # 是否在启动时自动检查模拟宇宙更新。true 开启，false 关闭。
 
 # 忘却之庭配置
 forgottenhall_enable: false # 是否启用混沌回忆功能。true 开启，false 关闭。

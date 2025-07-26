@@ -1,29 +1,30 @@
-from PyQt5.QtCore import Qt, QSize
+from contextlib import redirect_stdout
+
+from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication
 
-from contextlib import redirect_stdout
 with redirect_stdout(None):
     from qfluentwidgets import NavigationItemPosition, MSFluentWindow, SplashScreen, setThemeColor, NavigationBarPushButton, toggleTheme, setTheme, Theme
     from qfluentwidgets import FluentIcon as FIF
     from qfluentwidgets import InfoBar, InfoBarPosition
 
-from .home_interface import HomeInterface
-from .help_interface import HelpInterface
-# from .changelog_interface import ChangelogInterface
-from .warp_interface import WarpInterface
-from .tools_interface import ToolsInterface
-from .setting_interface import SettingInterface
-
-from .card.messagebox_custom import MessageBoxSupport
-from .tools.check_update import checkUpdate
-from .tools.check_theme_change import checkThemeChange
-from .tools.announcement import checkAnnouncement
-from .tools.disclaimer import disclaimer
+import base64
 
 from module.config import cfg
 from utils.gamecontroller import GameController
-import base64
+
+from .card.messagebox_custom import MessageBoxSupport
+from .help_interface import HelpInterface
+from .home_interface import HomeInterface
+from .setting_interface import SettingInterface
+from .tools.announcement import checkAnnouncement
+from .tools.check_theme_change import checkThemeChange
+from .tools.check_update import checkUniverseUpdate, checkUpdate
+from .tools.disclaimer import disclaimer
+from .tools_interface import ToolsInterface
+# from .changelog_interface import ChangelogInterface
+from .warp_interface import WarpInterface
 
 
 class MainWindow(MSFluentWindow):
@@ -36,6 +37,8 @@ class MainWindow(MSFluentWindow):
 
         # 检查更新
         checkUpdate(self, flag=True)
+        # 检查模拟宇宙更新
+        checkUniverseUpdate(self, flag=True)
         checkAnnouncement(self)
 
     def initWindow(self):
@@ -155,3 +158,4 @@ class MainWindow(MSFluentWindow):
                 duration=5000,
                 parent=self
             )
+            

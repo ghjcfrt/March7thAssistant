@@ -1,17 +1,18 @@
+import os
+import re
+import subprocess
+from enum import Enum
+
+import markdown
+import requests
+from packaging.version import parse
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from qfluentwidgets import InfoBar, InfoBarPosition
 
-from ..card.messagebox_custom import MessageBoxUpdate
-from tasks.base.fastest_mirror import FastestMirror
 from module.config import cfg
+from tasks.base.fastest_mirror import FastestMirror
 
-from packaging.version import parse
-from enum import Enum
-import subprocess
-import markdown
-import requests
-import re
-import os
+from ..card.messagebox_custom import MessageBoxUpdate
 
 
 class UpdateStatus(Enum):
@@ -124,6 +125,161 @@ class UpdateThread(QThread):
             self.updateSignal.emit(UpdateStatus.FAILURE)
 
 
+class UniverseUpdateThread(QThread):
+    """负责后台检查 Auto_Simulated_Universe 更新的线程类。"""
+    updateSignal = pyqtSignal(UpdateStatus)
+    progressSignal = pyqtSignal(int)  # 进度信号
+    statusSignal = pyqtSignal(str)    # 状态信息信号
+
+    def __init__(self, timeout=10):
+        super().__init__()
+        self.timeout = timeout
+        self.title = ""
+        self.content = ""
+        self.assert_url = ""
+        self.assert_name = ""
+        self.error_msg = ""
+        self._stop_requested = False  # 中断标志
+
+    def stop(self):
+        """请求停止线程"""
+        self._stop_requested = True
+        self.quit()
+        self.wait(3000)  # 等待最多3秒
+
+    def is_stopped(self):
+        """检查是否请求停止"""
+        return self._stop_requested
+
+    def get_local_universe_version(self):
+        """获取本地 Auto_Simulated_Universe 版本"""
+        # 首先尝试从 version.ini 读取
+        version_ini_file = os.path.join(str(cfg.universe_path), "version.ini")
+        if os.path.exists(version_ini_file):
+            try:
+                import configparser
+                config = configparser.ConfigParser()
+                config.read(version_ini_file, encoding='utf-8')
+                if 'Version' in config and 'current' in config['Version']:
+                    version = config['Version']['current']
+                    print(f"[DEBUG] 从 version.ini 读取版本: {version}")
+                    return version
+            except Exception as e:
+                print(f"[DEBUG] 读取 version.ini 失败: {e}")
+        
+        # 兼容性：尝试从旧的 version.txt 读取
+        version_txt_file = os.path.join(str(cfg.universe_path), "version.txt")
+        if os.path.exists(version_txt_file):
+            try:
+                with open(version_txt_file, 'r', encoding='utf-8') as f:
+                    version = f.read().strip()
+                    print(f"[DEBUG] 从 version.txt 读取版本: {version}")
+                    return version
+            except Exception as e:
+                print(f"[DEBUG] 读取 version.txt 失败: {e}")
+        
+        print("[DEBUG] 未找到版本文件，返回默认版本")
+        return "v0.0.0"  # 默认版本，表示未安装或版本文件不存在
+
+    def save_universe_version(self, version):
+        """保存 Auto_Simulated_Universe 版本到本地（兼容性方法）"""
+        version_ini_file = os.path.join(str(cfg.universe_path), "version.ini")
+        try:
+            os.makedirs(str(cfg.universe_path), exist_ok=True)
+            
+            # 写入到 version.ini
+            import configparser
+            config = configparser.ConfigParser()
+            config['Version'] = {
+                'current': version,
+                'updated_at': __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            with open(version_ini_file, 'w', encoding='utf-8') as f:
+                config.write(f)
+            
+            print(f"[DEBUG] 版本信息已保存到 version.ini: {version}")
+            
+        except Exception as e:
+            print(f"[DEBUG] 保存版本文件失败: {e}")
+            self.error_msg = f"保存版本文件失败: {e}"
+
+    def fetch_universe_release_info(self):
+        """获取 Auto_Simulated_Universe 的最新发布信息"""
+        try:
+            # 使用项目中已有的镜像加速功能
+            api_url = FastestMirror.get_github_api_mirror("CHNZYX", "Auto_Simulated_Universe")
+            response = requests.get(
+                api_url,
+                timeout=self.timeout,
+                headers=cfg.useragent
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            raise Exception(f"获取更新信息失败: {e}")
+
+    def get_download_url_from_assets(self, assets):
+        """从发布信息中获取下载URL，优先选择不带cpu的zip文件"""
+        for asset in assets:
+            name = asset.get("name", "")
+            if name.endswith('.zip') and 'cpu' not in name:
+                return asset["browser_download_url"], name
+        for asset in assets:
+            name = asset.get("name", "")
+            if name.endswith('.zip'):
+                return asset["browser_download_url"], name
+        if assets:
+            return assets[0]["browser_download_url"], assets[0].get("name", "")
+        return None, None
+
+    def run(self):
+        """执行 Auto_Simulated_Universe 更新检查逻辑"""
+        try:
+            # 检查配置是否启用自动检查更新
+            if not cfg.get_value("universe_auto_check_update", True):
+                return
+
+            releases = self.fetch_universe_release_info()
+            # releases: List[dict], 每个dict包含 tag_name, body, assets
+            if not isinstance(releases, list):
+                releases = [releases]
+
+            local_version = self.get_local_universe_version()
+            # 找到所有比本地版本新的版本，按tag_name降序排列
+            new_releases = [r for r in releases if parse(r["tag_name"].lstrip('v')) > parse(local_version.lstrip('v'))]
+            new_releases.sort(key=lambda r: parse(r["tag_name"].lstrip('v')), reverse=True)
+
+            # 最新版本信息
+            if new_releases:
+                latest = new_releases[0]
+                remote_version = latest["tag_name"]
+                self.assert_url, self.assert_name = self.get_download_url_from_assets(latest["assets"])
+                if self.assert_url is None:
+                    self.error_msg = "没有找到可下载的文件"
+                    self.updateSignal.emit(UpdateStatus.FAILURE)
+                    return
+                self.assert_url = FastestMirror.get_github_mirror(self.assert_url)
+                self.title = f"模拟宇宙发现新版本：{local_version} ——> {remote_version}"
+
+                # 拼接所有新版本的更新日志
+                logs = []
+                for release in new_releases:
+                    tag = release["tag_name"]
+                    body = release.get("body", "")
+                    # 保持原始GitHub格式，移除图片但保留markdown
+                    body = re.sub(r'!\[.*?\]\(.*?\)', '', body)
+                    logs.append(f"<h2>{tag}</h2>\n" + markdown.markdown(body))
+                # 新到旧
+                self.content = "<style>a {color: #f18cb9; font-weight: bold;}</style>" + "<hr>".join(logs)
+                self.updateSignal.emit(UpdateStatus.UPDATE_AVAILABLE)
+            else:
+                self.updateSignal.emit(UpdateStatus.SUCCESS)
+        except Exception as e:
+            self.error_msg = str(e)
+            self.updateSignal.emit(UpdateStatus.FAILURE)
+
+
 def checkUpdate(self, timeout=5, flag=False):
     """检查更新，并根据更新状态显示不同的信息或执行更新操作。"""
     def handle_update(status):
@@ -167,3 +323,95 @@ def checkUpdate(self, timeout=5, flag=False):
     self.update_thread = UpdateThread(timeout, flag)
     self.update_thread.updateSignal.connect(handle_update)
     self.update_thread.start()
+
+
+def checkUniverseUpdate(self, timeout=10, flag=False):
+    """检查 Auto_Simulated_Universe 更新"""
+    def handle_universe_update(status):
+        if status == UpdateStatus.UPDATE_AVAILABLE:
+            # 导入对话框
+            from ..card.universe_update_dialog import UniverseUpdateDialog
+            from .universe_downloader import UniverseDownloadThread
+
+            # 显示更新对话框
+            dialog = UniverseUpdateDialog(
+                self.universe_update_thread.title,
+                self.universe_update_thread.content,
+                self.window()
+            )
+            
+            download_thread = None
+            
+            def start_download():
+                """开始下载更新"""
+                nonlocal download_thread
+                try:
+                    print("[DEBUG] 开始下载更新")  # 调试信息
+                    # 获取远程版本
+                    remote_version = self.universe_update_thread.title.split("——>")[-1].strip()
+                    print(f"[DEBUG] 远程版本: {remote_version}")  # 调试信息
+                    
+                    # 创建下载线程
+                    download_thread = UniverseDownloadThread(
+                        self.universe_update_thread.assert_url,
+                        self.universe_update_thread.assert_name,
+                        remote_version
+                    )
+                    print(f"[DEBUG] 下载线程创建成功，URL: {self.universe_update_thread.assert_url}")  # 调试信息
+                    
+                    # 连接信号
+                    download_thread.progressSignal.connect(dialog.update_progress)
+                    download_thread.statusSignal.connect(dialog.update_status)
+                    download_thread.completedSignal.connect(
+                        lambda success, msg: dialog.update_completed(success, msg)
+                    )
+                    print("[DEBUG] 信号连接完成")  # 调试信息
+                    
+                    # 启动下载
+                    download_thread.start()
+                    print("[DEBUG] 下载线程已启动")  # 调试信息
+                    
+                except Exception as e:
+                    print(f"[DEBUG] 启动下载失败: {e}")  # 调试信息
+                    dialog.update_completed(False, f"启动下载失败：{str(e)}")
+            
+            def cancel_download():
+                """取消下载"""
+                if download_thread and download_thread.isRunning():
+                    download_thread.stop()
+                    download_thread.wait(5000)  # 等待最多5秒
+                dialog.update_cancelled()
+            
+            # 连接对话框信号
+            dialog.updateRequested.connect(start_download)
+            dialog.cancelRequested.connect(cancel_download)
+            
+            # 显示对话框
+            dialog.exec()
+            
+        elif status == UpdateStatus.SUCCESS:
+            if not flag:  # 只在手动检查时显示"已是最新版本"
+                InfoBar.success(
+                    title=self.tr('模拟宇宙已是最新版本'),
+                    content="",
+                    orient=Qt.Horizontal,
+                    isClosable=True,
+                    position=InfoBarPosition.TOP,
+                    duration=1000,
+                    parent=self
+                )
+        else:
+            # 显示检查更新失败的信息
+            InfoBar.warning(
+                title=self.tr('模拟宇宙更新检测失败'),
+                content=self.universe_update_thread.error_msg,
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+                parent=self
+            )
+
+    self.universe_update_thread = UniverseUpdateThread(timeout)
+    self.universe_update_thread.updateSignal.connect(handle_universe_update)
+    self.universe_update_thread.start()

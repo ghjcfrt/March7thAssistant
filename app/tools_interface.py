@@ -1,17 +1,23 @@
+import base64
+import os
+import subprocess
+
+import pyperclip
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout, QSpacerItem
+from PyQt5.QtWidgets import QLabel, QSpacerItem, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import SettingCardGroup, PushSettingCard, ScrollArea, InfoBar, InfoBarPosition, MessageBox
-from .card.messagebox_custom import MessageBoxEditMultiple
+from qfluentwidgets import (InfoBar, InfoBarPosition,
+                            PushSettingCard, ScrollArea, SettingCardGroup)
+
+import tasks.tool as tool
+from module.config import cfg
+from utils.registry.star_rail_setting import (get_game_fps,
+                                              get_graphics_setting,
+                                              set_game_fps)
+
 from .card.pushsettingcard1 import PushSettingCardCode
 from .common.style_sheet import StyleSheet
-from utils.registry.star_rail_setting import get_game_fps, set_game_fps, get_graphics_setting
-import tasks.tool as tool
-import base64
-import subprocess
-import pyperclip
-from module.config import cfg
-import os
+from .tools.check_update import checkUniverseUpdate
 
 
 class ToolsInterface(ScrollArea):
@@ -56,6 +62,13 @@ class ToolsInterface(ScrollArea):
             self.tr("以云游戏移动端 UI 的方式启动游戏，可搭配 Sunshine 和 Moonlight 使用，启动后会将命令复制到剪贴板内")
         )
         self.cloudTouchCard.setDisabled(True)
+        
+        self.checkUniverseUpdateCard = PushSettingCard(
+            self.tr('检查更新'),
+            FIF.SYNC,
+            self.tr("检查模拟宇宙更新"),
+            self.tr("手动检查 Auto_Simulated_Universe 是否有新版本")
+        )
 
         self.__initWidget()
 
@@ -80,6 +93,7 @@ class ToolsInterface(ScrollArea):
         self.ToolsGroup.addSettingCard(self.gameScreenshotCard)
         self.ToolsGroup.addSettingCard(self.unlockfpsCard)
         self.ToolsGroup.addSettingCard(self.redemptionCodeCard)
+        self.ToolsGroup.addSettingCard(self.checkUniverseUpdateCard)
         self.ToolsGroup.addSettingCard(self.cloudTouchCard)
 
         self.ToolsGroup.titleLabel.setHidden(True)
@@ -174,3 +188,10 @@ class ToolsInterface(ScrollArea):
         self.automaticPlotCard.clicked.connect(lambda: tool.start("plot"))
         self.unlockfpsCard.clicked.connect(self.__onUnlockfpsCardClicked)
         self.cloudTouchCard.clicked.connect(self.__onCloudTouchCardClicked)
+        self.checkUniverseUpdateCard.clicked.connect(lambda: checkUniverseUpdate(self.parent, flag=False))
+    def __connectSignalToSlot(self):
+        self.gameScreenshotCard.clicked.connect(lambda: tool.start("screenshot"))
+        self.automaticPlotCard.clicked.connect(lambda: tool.start("plot"))
+        self.unlockfpsCard.clicked.connect(self.__onUnlockfpsCardClicked)
+        self.cloudTouchCard.clicked.connect(self.__onCloudTouchCardClicked)
+        self.checkUniverseUpdateCard.clicked.connect(lambda: checkUniverseUpdate(self.parent, flag=False))

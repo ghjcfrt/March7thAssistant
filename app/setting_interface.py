@@ -1,22 +1,38 @@
 from PyQt5.QtCore import Qt, QUrl
-from PyQt5.QtGui import QDesktopServices, QFont
-from PyQt5.QtWidgets import QWidget, QLabel, QFileDialog, QVBoxLayout, QStackedWidget, QSpacerItem, QScrollArea, QSizePolicy
+from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtWidgets import (QFileDialog, QLabel,
+                            QSpacerItem, QStackedWidget, QVBoxLayout, QWidget)
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import SettingCardGroup, PushSettingCard, ScrollArea, InfoBar, PrimaryPushSettingCard
+from qfluentwidgets import (PrimaryPushSettingCard, PushSettingCard,
+                            ScrollArea, SettingCardGroup)
+
 from app.sub_interfaces.accounts_interface import accounts_interface
+from module.config import cfg
+from tasks.base.tasks import start_task
+
+from .card.comboboxsettingcard1 import ComboBoxSettingCard1
+from .card.comboboxsettingcard2 import (ComboBoxSettingCard2,
+                                        ComboBoxSettingCardLog,
+                                        ComboBoxSettingCardUpdateSource)
+from .card.pushsettingcard1 import (PushSettingCardDate, PushSettingCardEval,
+                                    PushSettingCardFriends,
+                                    PushSettingCardInstance,
+                                    PushSettingCardMirrorchyan,
+                                    PushSettingCardNotifyTemplate,
+                                    PushSettingCardTeam)
+from .card.rangesettingcard1 import RangeSettingCard1
+from .card.switchsettingcard1 import (StartMarch7thAssistantSwitchSettingCard,
+                                      SwitchSettingCard1,
+                                      SwitchSettingCardEchoofwar,
+                                      SwitchSettingCardGardenofplenty,
+                                      SwitchSettingCardHotkey,
+                                      SwitchSettingCardImmersifier,
+                                      SwitchSettingCardNotify,
+                                      SwitchSettingCardTeam)
+from .card.timepickersettingcard1 import TimePickerSettingCard1
 from .common.style_sheet import StyleSheet
 from .components.pivot import SettingPivot
-from .card.comboboxsettingcard1 import ComboBoxSettingCard1
-from .card.comboboxsettingcard2 import ComboBoxSettingCard2, ComboBoxSettingCardUpdateSource, ComboBoxSettingCardLog
-from .card.switchsettingcard1 import SwitchSettingCard1, SwitchSettingCardNotify, StartMarch7thAssistantSwitchSettingCard, SwitchSettingCardTeam, SwitchSettingCardImmersifier, SwitchSettingCardGardenofplenty, SwitchSettingCardEchoofwar, SwitchSettingCardHotkey
-from .card.rangesettingcard1 import RangeSettingCard1
-from .card.pushsettingcard1 import PushSettingCardInstance, PushSettingCardNotifyTemplate, PushSettingCardMirrorchyan, PushSettingCardEval, PushSettingCardDate, PushSettingCardKey, PushSettingCardTeam, PushSettingCardFriends
-from .card.timepickersettingcard1 import TimePickerSettingCard1
-from module.config import cfg
-from module.notification import notif
-from tasks.base.tasks import start_task
 from .tools.check_update import checkUpdate
-import os
 
 
 class SettingInterface(ScrollArea):
@@ -440,6 +456,18 @@ class SettingInterface(ScrollArea):
             self.tr("难度 (0为不配置，仅模拟宇宙生效)"),
             self.tr(""),
         )
+        self.universeAutoCheckUpdateCard = SwitchSettingCard1(
+            FIF.SYNC,
+            self.tr('启动时自动检查模拟宇宙更新'),
+            "检测到新版本时将弹窗提示用户选择是否更新",
+            "universe_auto_check_update"
+        )
+        self.universeUpdateCard = PrimaryPushSettingCard(
+            self.tr('立即更新'),
+            FIF.UPDATE,
+            self.tr("更新模拟宇宙"),
+            self.tr("立即检查并更新 Auto_Simulated_Universe 到最新版本")
+        )
 
         self.ForgottenhallGroup = SettingCardGroup(self.tr("混沌回忆"), self.scrollWidget)
         self.forgottenhallEnableCard = SwitchSettingCard1(
@@ -822,6 +850,8 @@ class SettingInterface(ScrollArea):
         self.UniverseGroup.addSettingCard(self.weeklyDivergentRunTimeCard)
         self.UniverseGroup.addSettingCard(self.universeFateCard)
         self.UniverseGroup.addSettingCard(self.universeDifficultyCard)
+        self.UniverseGroup.addSettingCard(self.universeAutoCheckUpdateCard)
+        self.UniverseGroup.addSettingCard(self.universeUpdateCard)
 
         self.ForgottenhallGroup.addSettingCard(self.forgottenhallEnableCard)
         self.ForgottenhallGroup.addSettingCard(self.forgottenhallLevelCard)
@@ -918,6 +948,126 @@ class SettingInterface(ScrollArea):
         self.feedbackCard.clicked.connect(self.__openUrl("https://github.com/moesnow/March7thAssistant/issues"))
 
         self.aboutCard.clicked.connect(lambda: checkUpdate(self.parent))
+        
+        self.universeUpdateCard.clicked.connect(self.__onUniverseUpdateCardClicked)
+
+    def __onUniverseUpdateCardClicked(self):
+        """处理模拟宇宙更新按钮点击"""
+        try:
+            from qfluentwidgets import InfoBar, InfoBarPosition
+
+            from app.card.universe_update_dialog import UniverseUpdateDialog
+            from app.tools.check_update import UniverseUpdateThread
+            from app.tools.universe_downloader import UniverseDownloadThread
+
+            # 创建更新检测线程
+            check_thread = UniverseUpdateThread(timeout=10)
+            
+            def handle_check_result(status):
+                from app.tools.check_update import UpdateStatus
+                
+                if status == UpdateStatus.UPDATE_AVAILABLE:
+                    # 显示更新对话框
+                    dialog = UniverseUpdateDialog(
+                        check_thread.title,
+                        check_thread.content,
+                        self.window()
+                    )
+                    
+                    download_thread = None
+                    
+                    def start_download():
+                        """开始下载更新"""
+                        nonlocal download_thread
+                        try:
+                            # 获取远程版本
+                            remote_version = check_thread.title.split("——>")[-1].strip()
+                            
+                            # 创建下载线程
+                            download_thread = UniverseDownloadThread(
+                                check_thread.assert_url,
+                                check_thread.assert_name,
+                                remote_version
+                            )
+                            
+                            # 连接信号
+                            download_thread.progressSignal.connect(dialog.update_progress)
+                            download_thread.statusSignal.connect(dialog.update_status)
+                            download_thread.completedSignal.connect(
+                                lambda success, msg: dialog.update_completed(success, msg)
+                            )
+                            
+                            # 启动下载
+                            download_thread.start()
+                            
+                        except Exception as e:
+                            dialog.update_completed(False, f"启动下载失败：{str(e)}")
+                    
+                    def cancel_download():
+                        """取消下载"""
+                        if download_thread and download_thread.isRunning():
+                            download_thread.stop()
+                            download_thread.wait(5000)  # 等待最多5秒
+                        dialog.update_cancelled()
+                    
+                    # 连接对话框信号
+                    dialog.updateRequested.connect(start_download)
+                    dialog.cancelRequested.connect(cancel_download)
+                    
+                    # 显示对话框
+                    dialog.exec()
+                    
+                elif status == UpdateStatus.SUCCESS:
+                    # 显示已是最新版本
+                    InfoBar.success(
+                        title=self.tr('模拟宇宙已是最新版本'),
+                        content="无需更新",
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=3000,
+                        parent=self
+                    )
+                else:
+                    # 显示检查失败
+                    InfoBar.error(
+                        title=self.tr('检查更新失败'),
+                        content=check_thread.error_msg,
+                        orient=Qt.Horizontal,
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=5000,
+                        parent=self
+                    )
+            
+            # 连接检测结果信号
+            check_thread.updateSignal.connect(handle_check_result)
+            
+            # 显示检查中提示
+            InfoBar.info(
+                title=self.tr('检查更新'),
+                content="正在检查模拟宇宙更新...",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=2000,
+                parent=self
+            )
+            
+            # 开始检查更新
+            check_thread.start()
+            
+        except Exception as e:
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            InfoBar.error(
+                title=self.tr('检查更新失败'),
+                content=f"检查更新失败: {str(e)}",
+                orient=Qt.Horizontal,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=5000,
+                parent=self
+            )
 
     def addSubInterface(self, widget: QLabel, objectName, text):
         def remove_spacing(layout):
@@ -983,3 +1133,4 @@ class SettingInterface(ScrollArea):
 
         self.verticalScrollBar().setValue(0)
         self.stackedWidget.setFixedHeight(self.stackedWidget.currentWidget().sizeHint().height())
+        return lambda: QDesktopServices.openUrl(QUrl(url))
