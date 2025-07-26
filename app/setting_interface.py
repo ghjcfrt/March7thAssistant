@@ -1,7 +1,7 @@
 from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QDesktopServices
-from PyQt5.QtWidgets import (QFileDialog, QLabel,
-                            QSpacerItem, QStackedWidget, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QFileDialog, QLabel, QSpacerItem, QStackedWidget,
+                             QVBoxLayout, QWidget)
 from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import (PrimaryPushSettingCard, PushSettingCard,
                             ScrollArea, SettingCardGroup)
@@ -987,7 +987,8 @@ class SettingInterface(ScrollArea):
                             download_thread = UniverseDownloadThread(
                                 check_thread.assert_url,
                                 check_thread.assert_name,
-                                remote_version
+                                remote_version,
+                                getattr(check_thread, 'assert_sha256', None)  # 传递 SHA256（如果存在）
                             )
                             
                             # 连接信号
@@ -1117,6 +1118,23 @@ class SettingInterface(ScrollArea):
 
     # def __showRestartTooltip(self):
     #     InfoBar.success(
+    #         self.tr('更新成功'),
+    #         self.tr('配置在重启软件后生效'),
+    #         duration=1500,
+    #         parent=self
+    #     )
+    def __onScriptPathCardClicked(self):
+        script_path, _ = QFileDialog.getOpenFileName(self, "脚本或程序路径", "", "脚本或可执行文件 (*.ps1 *.bat *.exe)")
+        if not script_path or cfg.script_path == script_path:
+            return
+        cfg.set_value("script_path", script_path)
+        self.ScriptPathCard.setContent(script_path)
+        widget = self.stackedWidget.widget(index)
+        self.pivot.setCurrentItem(widget.objectName())
+
+        self.verticalScrollBar().setValue(0)
+        self.stackedWidget.setFixedHeight(self.stackedWidget.currentWidget().sizeHint().height())
+        return lambda: QDesktopServices.openUrl(QUrl(url))
     #         self.tr('更新成功'),
     #         self.tr('配置在重启软件后生效'),
     #         duration=1500,

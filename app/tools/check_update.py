@@ -138,6 +138,7 @@ class UniverseUpdateThread(QThread):
         self.content = ""
         self.assert_url = ""
         self.assert_name = ""
+        self.assert_sha256 = ""  # SHA256 哈希值
         self.error_msg = ""
         self._stop_requested = False  # 中断标志
 
@@ -220,18 +221,25 @@ class UniverseUpdateThread(QThread):
             raise Exception(f"获取更新信息失败: {e}")
 
     def get_download_url_from_assets(self, assets):
-        """从发布信息中获取下载URL，优先选择不带cpu的zip文件"""
+        """从发布信息中获取下载URL，优先选择不带cpu的zip文件，同时获取SHA256值"""
         for asset in assets:
             name = asset.get("name", "")
             if name.endswith('.zip') and 'cpu' not in name:
-                return asset["browser_download_url"], name
+                # 从 digest 字段获取 SHA256 值（格式：sha256:xxxx）
+                digest = asset.get("digest", "")
+                sha256_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else None
+                return asset["browser_download_url"], name, sha256_hash
         for asset in assets:
             name = asset.get("name", "")
             if name.endswith('.zip'):
-                return asset["browser_download_url"], name
+                digest = asset.get("digest", "")
+                sha256_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else None
+                return asset["browser_download_url"], name, sha256_hash
         if assets:
-            return assets[0]["browser_download_url"], assets[0].get("name", "")
-        return None, None
+            digest = assets[0].get("digest", "")
+            sha256_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else None
+            return assets[0]["browser_download_url"], assets[0].get("name", ""), sha256_hash
+        return None, None, None
 
     def run(self):
         """执行 Auto_Simulated_Universe 更新检查逻辑"""
@@ -254,7 +262,7 @@ class UniverseUpdateThread(QThread):
             if new_releases:
                 latest = new_releases[0]
                 remote_version = latest["tag_name"]
-                self.assert_url, self.assert_name = self.get_download_url_from_assets(latest["assets"])
+                self.assert_url, self.assert_name, self.assert_sha256 = self.get_download_url_from_assets(latest["assets"])
                 if self.assert_url is None:
                     self.error_msg = "没有找到可下载的文件"
                     self.updateSignal.emit(UpdateStatus.FAILURE)
@@ -355,7 +363,8 @@ def checkUniverseUpdate(self, timeout=10, flag=False):
                     download_thread = UniverseDownloadThread(
                         self.universe_update_thread.assert_url,
                         self.universe_update_thread.assert_name,
-                        remote_version
+                        remote_version,
+                        self.universe_update_thread.assert_sha256  # 传递 SHA256
                     )
                     print(f"[DEBUG] 下载线程创建成功，URL: {self.universe_update_thread.assert_url}")  # 调试信息
                     
